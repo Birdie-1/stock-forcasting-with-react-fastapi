@@ -138,4 +138,4 @@ MIT License
 
 ## Author
 
-Your Name
+Naruebordee Boonma and Yotwarit Ardnonla
