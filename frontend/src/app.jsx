@@ -851,8 +851,8 @@ const ForecastingPage = () => {
                   dataKey="upper" 
                   stackId="1"
                   stroke="none"
-                  fill="#fef3c7"
-                  fillOpacity={0.6}
+                  fill="#fbbf24"
+                  fillOpacity={0.4}
                   name="ช่วงความเชื่อมั่นบน"
                 />
                 <Area 
@@ -868,8 +868,8 @@ const ForecastingPage = () => {
                   dataKey="lower" 
                   stackId="2"
                   stroke="none"
-                  fill="#fef3c7"
-                  fillOpacity={0.6}
+                  fill="#fbbf24"
+                  fillOpacity={0.4}
                   name="ช่วงความเชื่อมั่นล่าง"
                 />
               </AreaChart>
