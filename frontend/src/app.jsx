@@ -105,7 +105,7 @@ const Dashboard = ({ onNavigate }) => {
             <tbody>
               {stats?.recent_transactions.slice(0, 8).map((trans) => (
                 <tr key={trans.id} className="border-b border-gray-100 hover:bg-gray-50">
-                  <td className="py-3 px-4 text-sm text-gray-600">
+                  <td className="py-3 px-4 text-sm text-gray-800 font-medium">
                     {new Date(trans.transaction_date).toLocaleDateString('th-TH', {
                       year: 'numeric',
                       month: 'short',
@@ -514,7 +514,7 @@ const TransactionsPage = () => {
             <tbody>
               {transactions.map((trans) => (
                 <tr key={trans.id} className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="py-4 px-6 text-sm text-gray-600">
+                  <td className="py-4 px-6 text-sm text-gray-800 font-medium">
                     {new Date(trans.transaction_date).toLocaleString('th-TH')}
                   </td>
                   <td className="py-4 px-6 text-sm text-gray-900">
@@ -542,7 +542,7 @@ const TransactionsPage = () => {
                   <td className="py-4 px-6 text-right text-sm font-semibold text-gray-900">
                     {trans.quantity.toLocaleString()}
                   </td>
-                  <td className="py-4 px-6 text-sm text-gray-600">{trans.note || '-'}</td>
+                  <td className="py-4 px-6 text-sm text-gray-800 font-medium">{trans.note || '-'}</td>
                 </tr>
               ))}
             </tbody>
@@ -807,7 +807,7 @@ const ForecastingPage = () => {
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="mb-4">
               <h3 className="text-lg font-bold text-gray-900">กราฟการพยากรณ์</h3>
-              <p className="text-sm text-gray-600">
+              <p className="text-sm font-medium text-gray-800">
                 ARIMA({forecastData.forecast.arima_params.p}, {forecastData.forecast.arima_params.d}, {forecastData.forecast.arima_params.q})
               </p>
             </div>
@@ -823,22 +823,29 @@ const ForecastingPage = () => {
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis 
                   dataKey="date" 
-                  stroke="#6b7280"
-                  style={{ fontSize: '12px' }}
+                  stroke="#374151"
+                  tick={{ fill: '#1f2937', fontSize: 12, fontWeight: 500 }}
+                  style={{ fontSize: '12px', fontWeight: '500' }}
                 />
                 <YAxis 
-                  stroke="#6b7280"
-                  style={{ fontSize: '12px' }}
+                  stroke="#374151"
+                  tick={{ fill: '#1f2937', fontSize: 12, fontWeight: 500 }}
+                  style={{ fontSize: '12px', fontWeight: '500' }}
                 />
                 <Tooltip 
                   contentStyle={{
                     backgroundColor: 'white',
                     border: '1px solid #e5e7eb',
                     borderRadius: '8px',
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                    color: '#1f2937',
+                    fontWeight: '500'
                   }}
+                  labelStyle={{ color: '#111827', fontWeight: '600' }}
                 />
-                <Legend />
+                <Legend 
+                  wrapperStyle={{ color: '#1f2937', fontWeight: '500' }}
+                />
                 <Area 
                   type="monotone" 
                   dataKey="upper" 
@@ -873,19 +880,19 @@ const ForecastingPage = () => {
             <h3 className="text-lg font-bold text-gray-900 mb-4">สถิติและตัวชี้วัด</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <div>
-                <p className="text-sm text-gray-600">ความต้องการเฉลี่ยต่อวัน</p>
+                <p className="text-sm font-medium text-gray-800">ความต้องการเฉลี่ยต่อวัน</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {forecastData.metrics.avg_daily_demand.toFixed(2)} {forecastData.product.unit}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-600">ความต้องการต่อปี (ประมาณ)</p>
+                <p className="text-sm font-medium text-gray-800">ความต้องการต่อปี (ประมาณ)</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {Math.round(forecastData.metrics.annual_demand).toLocaleString()} {forecastData.product.unit}
                 </p>
               </div>
               <div>
-                <p className="text-sm text-gray-600">ส่วนเบี่ยงเบนมาตรฐาน</p>
+                <p className="text-sm font-medium text-gray-800">ส่วนเบี่ยงเบนมาตรฐาน</p>
                 <p className="text-2xl font-bold text-gray-900 mt-1">
                   {forecastData.metrics.demand_std.toFixed(2)}
                 </p>
@@ -952,7 +959,7 @@ const SalesUploadPage = () => {
           <div className="text-center mb-8">
             <Upload className="w-16 h-16 text-amber-600 mx-auto mb-4" />
             <h3 className="text-xl font-bold text-gray-900 mb-2">อัพโหลดไฟล์ CSV</h3>
-            <p className="text-gray-600">
+            <p className="text-gray-800 font-medium">
               ไฟล์ต้องมีคอลัมน์: product_code, date, quantity
             </p>
           </div>
