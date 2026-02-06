@@ -101,6 +101,7 @@ class ProductUpdate(BaseModel):
     ordering_cost: Optional[float] = None
     holding_cost_percentage: Optional[float] = None
     lead_time_days: Optional[int] = None
+    current_stock: Optional[int] = None
 
 class Transaction(BaseModel):
     product_id: int
@@ -280,6 +281,9 @@ async def update_product(product_id: int, product: ProductUpdate):
     if product.lead_time_days is not None:
         update_fields.append("lead_time_days = ?")
         values.append(product.lead_time_days)
+    if product.current_stock is not None:
+        update_fields.append("current_stock = ?")
+        values.append(product.current_stock)
     
     if not update_fields:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -543,7 +547,7 @@ async def get_dashboard():
     """)
     products = cursor.fetchall()
     
-    low_stock_count = 0
+    low_stock_products = []
     for product in products:
         product = dict(product)
         if product['avg_sales']:
@@ -553,7 +557,23 @@ async def get_dashboard():
             rop = calculate_rop(avg_daily, product['lead_time_days'], safety_stock)
             
             if product['current_stock'] <= rop:
-                low_stock_count += 1
+                # Calculate EOQ components
+                # Existing logic assumes avg_sales is monthly for some reason (avg_daily = avg_sales / 30)
+                # We follow that pattern to be consistent, although it looks suspicious.
+                avg_daily = product['avg_sales'] / 30
+                annual_demand = avg_daily * 365
+                holding_cost = product['unit_cost'] * product['holding_cost_percentage']
+                
+                product_data = {
+                    "id": product["id"],
+                    "name": product["name"],
+                    "code": product["code"],
+                    "current_stock": product["current_stock"],
+                    "unit": product["unit"],
+                    "rop": int(rop),
+                    "eoq": int(calculate_eoq(annual_demand, product['ordering_cost'], holding_cost))
+                }
+                low_stock_products.append(product_data)
     
     # Total stock value
     cursor.execute("SELECT SUM(current_stock * unit_cost) as total_value FROM products")
@@ -573,8 +593,9 @@ async def get_dashboard():
     
     return {
         "total_products": total_products,
-        "low_stock_count": low_stock_count,
-        "total_stock_value": round(total_value, 2),
+        "low_stock_count": len(low_stock_products),
+        "low_stock_products": low_stock_products,
+        "total_stock_value": total_value,
         "recent_transactions": recent_transactions
     }
 
