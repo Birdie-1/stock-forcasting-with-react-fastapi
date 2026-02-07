@@ -599,6 +599,87 @@ async def get_dashboard():
         "recent_transactions": recent_transactions
     }
 
+@app.get("/api/analytics")
+async def get_analytics():
+    conn = get_db()
+    cursor = conn.cursor()
+    
+    # 1. Sales Trends (Last 30 days)
+    cursor.execute("""
+        SELECT sale_date, SUM(quantity) as total_qty
+        FROM sales_history
+        WHERE sale_date >= date('now', '-30 days')
+        GROUP BY sale_date
+        ORDER BY sale_date
+    """)
+    sales_trends = [dict(row) for row in cursor.fetchall()]
+    
+    # 2. Top Moving Products (Top 10 by 'out' transactions)
+    cursor.execute("""
+        SELECT p.name, SUM(t.quantity) as total_qty
+        FROM transactions t
+        JOIN products p ON t.product_id = p.id
+        WHERE t.transaction_type = 'out'
+        GROUP BY p.id
+        ORDER BY total_qty DESC
+        LIMIT 10
+    """)
+    top_products = [dict(row) for row in cursor.fetchall()]
+    
+    # 3. Inventory Value by Category
+    cursor.execute("""
+        SELECT category, SUM(current_stock * unit_cost) as value
+        FROM products
+        GROUP BY category
+        ORDER BY value DESC
+    """)
+    category_value = [dict(row) for row in cursor.fetchall()]
+    
+    # 4. Inventory Turn Rate (Simplifed: Total Sales / Total Current Stock)
+    cursor.execute("""
+        SELECT 
+            (SELECT SUM(s.quantity * p.unit_cost) FROM sales_history s JOIN products p ON s.product_id = p.id) as total_sales_value,
+            (SELECT SUM(current_stock * unit_cost) FROM products) as current_inv_value
+    """)
+    turn_metrics = dict(cursor.fetchone())
+    turn_rate = 0
+    if turn_metrics['current_inv_value'] and turn_metrics['current_inv_value'] > 0:
+        turn_rate = turn_metrics['total_sales_value'] / turn_metrics['current_inv_value']
+    
+    # 5. Stock Health (Healthy vs Low vs Out)
+    cursor.execute("""
+        SELECT p.id, p.current_stock, p.lead_time_days,
+               (SELECT AVG(quantity) FROM sales_history WHERE product_id = p.id) as avg_sales
+        FROM products p
+    """)
+    health_check = cursor.fetchall()
+    
+    stats = {"healthy": 0, "low_stock": 0, "out_of_stock": 0}
+    for p in health_check:
+        p = dict(p)
+        if p['current_stock'] <= 0:
+            stats["out_of_stock"] += 1
+        else:
+            avg_daily = (p['avg_sales'] or 0) / 30
+            demand_std = (p['avg_sales'] or 0) * 0.3
+            ss = calculate_safety_stock(demand_std, p['lead_time_days'])
+            rop = calculate_rop(avg_daily, p['lead_time_days'], ss)
+            
+            if p['current_stock'] <= rop:
+                stats["low_stock"] += 1
+            else:
+                stats["healthy"] += 1
+
+    conn.close()
+    
+    return {
+        "sales_trends": sales_trends,
+        "top_products": top_products,
+        "category_value": category_value,
+        "turn_rate": round(turn_rate, 2),
+        "stock_health": stats
+    }
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

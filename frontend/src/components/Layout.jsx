@@ -8,7 +8,8 @@ import {
   Upload, 
   Boxes, 
   Menu, 
-  X 
+  X,
+  BarChart3
 } from 'lucide-react';
 import { Toaster } from 'react-hot-toast';
 
@@ -22,6 +23,7 @@ const Layout = () => {
     { name: 'ธุรกรรม', href: '/transactions', icon: ArrowUpCircle },
     { name: 'พยากรณ์', href: '/forecast', icon: TrendingUp },
     { name: 'นำเข้าข้อมูล', href: '/upload', icon: Upload },
+    { name: 'รายงานวิเคราะห์', href: '/analytics', icon: BarChart3 },
   ];
 
   return (

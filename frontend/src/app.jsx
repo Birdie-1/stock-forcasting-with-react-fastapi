@@ -6,6 +6,7 @@ import Products from './pages/Products';
 import Transactions from './pages/Transactions';
 import Forecasting from './pages/Forecasting';
 import SalesUpload from './pages/SalesUpload';
+import Analytics from './pages/Analytics';
 
 const App = () => {
   return (
@@ -17,6 +18,7 @@ const App = () => {
           <Route path="transactions" element={<Transactions />} />
           <Route path="forecast" element={<Forecasting />} />
           <Route path="upload" element={<SalesUpload />} />
+          <Route path="analytics" element={<Analytics />} />
           {/* Fallback route */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
