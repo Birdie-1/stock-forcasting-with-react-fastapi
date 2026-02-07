@@ -347,6 +347,13 @@ async def create_transaction(transaction: Transaction):
     """, (transaction.product_id, transaction.transaction_type, 
           transaction.quantity, transaction.note))
     
+    # NEW: If 'out', add to sales_history for forecasting/analytics
+    if transaction.transaction_type == 'out':
+        cursor.execute("""
+            INSERT INTO sales_history (product_id, sale_date, quantity)
+            VALUES (?, date('now'), ?)
+        """, (transaction.product_id, transaction.quantity))
+    
     # Update product stock
     cursor.execute("UPDATE products SET current_stock = ? WHERE id = ?",
                   (new_stock, transaction.product_id))
@@ -425,10 +432,25 @@ async def upload_sales_csv(file: UploadFile = File(...)):
             
             if result:
                 product_id = result[0]
+                # 1. Insert into sales_history (for forecasting)
                 cursor.execute("""
                     INSERT INTO sales_history (product_id, sale_date, quantity)
                     VALUES (?, ?, ?)
                 """, (product_id, row['date'], int(row['quantity'])))
+
+                # 2. Insert into transactions (for stock tracking history)
+                cursor.execute("""
+                    INSERT INTO transactions (product_id, transaction_type, quantity, note)
+                    VALUES (?, 'out', ?, 'Auto-imported from CSV')
+                """, (product_id, int(row['quantity'])))
+
+                # 3. Update current stock (Deduct stock)
+                cursor.execute("""
+                    UPDATE products 
+                    SET current_stock = current_stock - ? 
+                    WHERE id = ?
+                """, (int(row['quantity']), product_id))
+                
                 inserted += 1
         
         conn.commit()
@@ -614,12 +636,11 @@ async def get_analytics():
     """)
     sales_trends = [dict(row) for row in cursor.fetchall()]
     
-    # 2. Top Moving Products (Top 10 by 'out' transactions)
+    # 2. Top Moving Products (Top 10 by Sales Quantity)
     cursor.execute("""
-        SELECT p.name, SUM(t.quantity) as total_qty
-        FROM transactions t
-        JOIN products p ON t.product_id = p.id
-        WHERE t.transaction_type = 'out'
+        SELECT p.name, SUM(s.quantity) as total_qty
+        FROM sales_history s
+        JOIN products p ON s.product_id = p.id
         GROUP BY p.id
         ORDER BY total_qty DESC
         LIMIT 10

@@ -6,9 +6,10 @@ A modern inventory management and demand forecasting system built with React fro
 
 - 📊 **Dashboard** - Real-time inventory statistics and recent transactions
 - 📦 **Product Management** - Add, edit, and manage products with detailed information
-- 💰 **Transaction Tracking** - Record stock in/out transactions
-- 📈 **Demand Forecasting** - ARIMA-based forecasting with confidence intervals
-- 📤 **Data Import** - Upload sales data via CSV files
+- 💰 **Transaction Tracking** - Record stock in/out transactions (automatically synced to Sales History)
+- 📈 **Demand Forecasting** - ARIMA-based forecasting with confidence intervals and recommended order quantity
+- 📉 **Analytics & Reports** - Deep dive into sales trends, best sellers, and stock health with interactive charts
+- 📤 **Data Import** - Upload sales data via CSV files (automatically deducts stock and records transactions)
 - 🎯 **Inventory Metrics** - EOQ, Safety Stock, and Reorder Point calculations
 
 ## Tech Stack
