@@ -97,40 +97,88 @@ const Forecasting = () => {
     };
 
     const buckets = {};
+    const bucketCounts = {};
     for (const p of filtered) {
       const k = weekKey(p.dateISO);
       buckets[k] = (buckets[k] || 0) + p.actual;
+      bucketCounts[k] = (bucketCounts[k] || 0) + 1;
     }
 
     return Object.keys(buckets)
       .sort()
       .map((k) => {
         const d = new Date(k);
+        // Normalize to 7 days if partial week
+        const daysInWeek = bucketCounts[k] || 1;
+        const normalized = Math.round((buckets[k] / daysInWeek) * 7);
         return {
           dateISO: k,
           date: d.toLocaleDateString('th-TH', { month: 'short', day: 'numeric' }),
-          actual: buckets[k]
+          actual: normalized,
+          rawActual: buckets[k], // Keep raw for tooltip if needed
+          isPartial: daysInWeek < 7
         };
       });
   }, [historySeries, historyRangeDays, historyGranularity]);
 
   // Combine actual history (ซีกซ้าย) + forecast (ซีกขวา)
+  // Combine actual history (ซีกซ้าย) + forecast (ซีกขวา)
   const chartData = useMemo(() => {
     if (!forecastData && visibleHistorySeries.length === 0) return [];
 
-    const forecastPoints = forecastData
-      ? forecastData.forecast.dates.map((date, idx) => {
+    let forecastPoints = [];
+    if (forecastData) {
+      if (historyGranularity === 'weekly') {
+        // Aggregate forecast into weeks to match history scale
+        const buckets = {};
+        const bucketCounts = {};
+        
+        // Helper to get Monday-based week key (replicated from visibleHistorySeries logic)
+        const getWeekKey = (d) => {
+          const day = (d.getDay() + 6) % 7; // 0 = Monday
+          const monday = new Date(d);
+          monday.setDate(d.getDate() - day);
+          const y = monday.getFullYear();
+          const m = String(monday.getMonth() + 1).padStart(2, '0');
+          const dd = String(monday.getDate()).padStart(2, '0');
+          return `${y}-${m}-${dd}`;
+        };
+
+        forecastData.forecast.dates.forEach((dateISO, idx) => {
+          const d = new Date(dateISO);
+          const k = getWeekKey(d);
+          buckets[k] = (buckets[k] || 0) + forecastData.forecast.values[idx];
+          bucketCounts[k] = (bucketCounts[k] || 0) + 1;
+        });
+
+        forecastPoints = Object.keys(buckets).sort().map(k => {
+          const d = new Date(k);
+          // Normalize to 7 days if partial week
+          const daysInWeek = bucketCounts[k] || 1;
+          const normalized = Math.round((buckets[k] / daysInWeek) * 7);
+          
+          return {
+            dateISO: k,
+            date: d.toLocaleDateString('th-TH', { month: 'short', day: 'numeric' }),
+            forecast: normalized,
+            isPartial: daysInWeek < 7
+          };
+        });
+      } else {
+        // Daily granularity
+        forecastPoints = forecastData.forecast.dates.map((date, idx) => {
           const d = new Date(date);
           return {
             dateISO: date,
             date: d.toLocaleDateString('th-TH', { month: 'short', day: 'numeric' }),
             forecast: Math.round(forecastData.forecast.values[idx])
           };
-        })
-      : [];
+        });
+      }
+    }
 
     return [...visibleHistorySeries, ...forecastPoints];
-  }, [visibleHistorySeries, forecastData]);
+  }, [visibleHistorySeries, forecastData, historyGranularity]);
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
