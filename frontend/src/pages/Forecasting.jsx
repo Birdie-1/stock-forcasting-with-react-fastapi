@@ -268,7 +268,7 @@ const Forecasting = () => {
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-6 border border-blue-200 shadow-sm">
               <p className="text-sm font-medium text-blue-800">EOQ (ปริมาณสั่งซื้อที่เหมาะสม)</p>
               <p className="text-3xl font-bold text-blue-900 mt-2">
-                {forecastData.metrics.eoq.toLocaleString()}
+                {Math.round(forecastData.metrics.eoq).toLocaleString()}
               </p>
               <p className="text-xs text-blue-700 mt-1">{forecastData.product.unit}</p>
             </div>
@@ -276,7 +276,7 @@ const Forecasting = () => {
             <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-6 border border-purple-200 shadow-sm">
               <p className="text-sm font-medium text-purple-800">Safety Stock</p>
               <p className="text-3xl font-bold text-purple-900 mt-2">
-                {forecastData.metrics.safety_stock.toLocaleString()}
+                {Math.round(forecastData.metrics.safety_stock).toLocaleString()}
               </p>
               <p className="text-xs text-purple-700 mt-1">{forecastData.product.unit}</p>
             </div>
@@ -284,16 +284,16 @@ const Forecasting = () => {
             <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-xl p-6 border border-orange-200 shadow-sm">
               <p className="text-sm font-medium text-orange-800">Reorder Point</p>
               <p className="text-3xl font-bold text-orange-900 mt-2">
-                {forecastData.metrics.reorder_point.toLocaleString()}
+                {Math.round(forecastData.metrics.reorder_point).toLocaleString()}
               </p>
               <p className="text-xs text-orange-700 mt-1">{forecastData.product.unit}</p>
             </div>
 
             {forecastData.metrics.stock_status === 'ต้องสั่งซื้อ' ? (
               <div className="bg-gradient-to-br from-red-50 to-rose-50 rounded-xl p-6 border border-red-200 shadow-sm animate-pulse">
-                <p className="text-sm font-medium text-red-800">แนะนำสั่งซื้อเพิ่ม</p>
+                <p className="text-sm font-medium text-red-800">สต๊อกคงเหลือ</p>
                 <p className="text-3xl font-bold text-red-900 mt-2">
-                  {forecastData.metrics.eoq.toLocaleString()}
+                  {forecastData.metrics.current_stock.toLocaleString()}
                 </p>
                 <div className="flex justify-between items-end mt-1">
                     <p className="text-xs text-red-700">{forecastData.product.unit}</p>
@@ -304,7 +304,7 @@ const Forecasting = () => {
               </div>
             ) : (
               <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl p-6 border border-green-200 shadow-sm">
-                <p className="text-sm font-medium text-green-800">สถานะสต๊อก</p>
+                <p className="text-sm font-medium text-green-800">สต๊อกคงเหลือ</p>
                 <p className="text-3xl font-bold text-green-900 mt-2">
                   {forecastData.metrics.current_stock.toLocaleString()}
                 </p>

@@ -38,7 +38,7 @@ const Layout = () => {
               <Boxes className="w-10 h-10 text-white" />
               <div>
                 <h1 className="text-xl md:text-2xl font-bold text-white leading-tight">
-                  ระบบจัดการสต๊อก
+                  ระบบจัดการสินค้าคงคลัง
                 </h1>
                 <p className="text-amber-100 text-xs md:text-sm hidden sm:block">
                   Inventory Forecasting System with ARIMA

@@ -61,3 +61,7 @@ frontend/build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Data
+*.csv
+*.txt

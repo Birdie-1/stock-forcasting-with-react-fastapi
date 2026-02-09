@@ -191,6 +191,28 @@ def calculate_rop(avg_daily_demand, lead_time_days, safety_stock):
     rop = lead_time_demand + safety_stock
     return round(rop, 2)
 
+def get_product_demand_metrics(product_id, conn):
+    """Calculate consistent demand metrics for a product"""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT sale_date, quantity FROM sales_history 
+        WHERE product_id = ?
+        ORDER BY sale_date
+    """, (product_id,))
+    
+    rows = cursor.fetchall()
+    if not rows or len(rows) < 2:
+        return 0.0, 0.0
+        
+    sales_data = [dict(row) for row in rows]
+    df = pd.DataFrame(sales_data)
+    df['sale_date'] = pd.to_datetime(df['sale_date'])
+    
+    # Resample to daily and fill missing dates to get accurate daily stats
+    daily_sales = df.resample('D', on='sale_date')['quantity'].sum()
+    
+    return float(daily_sales.mean()), float(daily_sales.std() or 0.0)
+
 # API Endpoints
 @app.on_event("startup")
 async def startup():
@@ -498,7 +520,7 @@ async def get_forecast(product_id: int, periods: int = 30):
     """, (product_id,))
     
     sales_data = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+    # Move conn.close() later after metrics calculation
     
     if len(sales_data) < 10:
         raise HTTPException(status_code=400, 
@@ -511,12 +533,8 @@ async def get_forecast(product_id: int, periods: int = 30):
         raise HTTPException(status_code=500, detail="Forecasting failed")
     
     # Calculate statistics
-    df = pd.DataFrame(sales_data)
-    df['sale_date'] = pd.to_datetime(df['sale_date'])
-    daily_sales = df.resample('D', on='sale_date')['quantity'].sum()
-    
-    avg_daily_demand = daily_sales.mean()
-    demand_std = daily_sales.std()
+    avg_daily_demand, demand_std = get_product_demand_metrics(product_id, conn)
+    conn.close() # Now we can close it
     annual_demand = avg_daily_demand * 365
     
     # Calculate inventory metrics
@@ -557,51 +575,15 @@ async def get_dashboard():
     conn = get_db()
     cursor = conn.cursor()
     
-    # Total products
+    # 1. Total products
     cursor.execute("SELECT COUNT(*) as total FROM products")
     total_products = cursor.fetchone()[0]
     
-    # Products needing reorder
-    cursor.execute("""
-        SELECT p.*, 
-               (SELECT AVG(quantity) FROM sales_history WHERE product_id = p.id) as avg_sales
-        FROM products p
-    """)
-    products = cursor.fetchall()
-    
-    low_stock_products = []
-    for product in products:
-        product = dict(product)
-        if product['avg_sales']:
-            avg_daily = product['avg_sales'] / 30
-            demand_std = product['avg_sales'] * 0.3  # Simplified
-            safety_stock = calculate_safety_stock(demand_std, product['lead_time_days'])
-            rop = calculate_rop(avg_daily, product['lead_time_days'], safety_stock)
-            
-            if product['current_stock'] <= rop:
-                # Calculate EOQ components
-                # Existing logic assumes avg_sales is monthly for some reason (avg_daily = avg_sales / 30)
-                # We follow that pattern to be consistent, although it looks suspicious.
-                avg_daily = product['avg_sales'] / 30
-                annual_demand = avg_daily * 365
-                holding_cost = product['unit_cost'] * product['holding_cost_percentage']
-                
-                product_data = {
-                    "id": product["id"],
-                    "name": product["name"],
-                    "code": product["code"],
-                    "current_stock": product["current_stock"],
-                    "unit": product["unit"],
-                    "rop": int(rop),
-                    "eoq": int(calculate_eoq(annual_demand, product['ordering_cost'], holding_cost))
-                }
-                low_stock_products.append(product_data)
-    
-    # Total stock value
+    # 2. Total stock value
     cursor.execute("SELECT SUM(current_stock * unit_cost) as total_value FROM products")
     total_value = cursor.fetchone()[0] or 0
     
-    # Recent transactions
+    # 3. Recent transactions
     cursor.execute("""
         SELECT t.*, p.name as product_name 
         FROM transactions t
@@ -610,6 +592,34 @@ async def get_dashboard():
         LIMIT 10
     """)
     recent_transactions = [dict(row) for row in cursor.fetchall()]
+
+    # 4. Products needing reorder (Stock <= ROP)
+    cursor.execute("SELECT * FROM products")
+    products = cursor.fetchall()
+    
+    low_stock_products = []
+    for product in products:
+        product = dict(product)
+        avg_daily, demand_std = get_product_demand_metrics(product['id'], conn)
+        
+        if avg_daily > 0:
+            safety_stock = calculate_safety_stock(demand_std, product['lead_time_days'])
+            rop = calculate_rop(avg_daily, product['lead_time_days'], safety_stock)
+            
+            if product['current_stock'] <= rop:
+                annual_demand = avg_daily * 365
+                holding_cost = product['unit_cost'] * product['holding_cost_percentage']
+                eoq = calculate_eoq(annual_demand, product['ordering_cost'], holding_cost)
+                
+                low_stock_products.append({
+                    "id": product["id"],
+                    "name": product["name"],
+                    "code": product["code"],
+                    "current_stock": product["current_stock"],
+                    "unit": product["unit"],
+                    "rop": int(rop),
+                    "eoq": int(eoq)
+                })
     
     conn.close()
     
@@ -681,14 +691,18 @@ async def get_analytics():
         if p['current_stock'] <= 0:
             stats["out_of_stock"] += 1
         else:
-            avg_daily = (p['avg_sales'] or 0) / 30
-            demand_std = (p['avg_sales'] or 0) * 0.3
-            ss = calculate_safety_stock(demand_std, p['lead_time_days'])
-            rop = calculate_rop(avg_daily, p['lead_time_days'], ss)
+            avg_daily, demand_std = get_product_demand_metrics(p['id'], conn)
             
-            if p['current_stock'] <= rop:
-                stats["low_stock"] += 1
+            if avg_daily > 0:
+                ss = calculate_safety_stock(demand_std, p['lead_time_days'])
+                rop = calculate_rop(avg_daily, p['lead_time_days'], ss)
+                
+                if p['current_stock'] <= rop:
+                    stats["low_stock"] += 1
+                else:
+                    stats["healthy"] += 1
             else:
+                # No sales data, assume healthy if stock > 0
                 stats["healthy"] += 1
 
     conn.close()
