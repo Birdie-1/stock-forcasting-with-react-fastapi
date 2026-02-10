@@ -98,7 +98,7 @@ const Transactions = () => {
                 {transactions.map((trans) => (
                   <tr key={trans.id} className="hover:bg-gray-50 transition-colors">
                     <td className="py-4 px-6 text-sm text-gray-800 font-medium">
-                      {new Date(trans.transaction_date).toLocaleString('th-TH')}
+                      {new Date(trans.transaction_date + 'Z').toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}
                     </td>
                     <td className="py-4 px-6 text-sm text-gray-900">
                       {trans.product_code} - {trans.product_name}

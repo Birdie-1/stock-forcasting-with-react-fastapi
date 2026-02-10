@@ -152,8 +152,8 @@ const Dashboard = () => {
                     {stats.recent_transactions.slice(0, 8).map((trans) => (
                     <tr key={trans.id} className="hover:bg-gray-50/50 transition-colors">
                         <td className="py-3 px-4 text-sm text-gray-600 font-mono">
-                        {new Date(trans.transaction_date).toLocaleDateString('th-TH', {
-                            day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+                        {new Date(trans.transaction_date + 'Z').toLocaleDateString('th-TH', {
+                            day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok'
                         })}
                         </td>
                         <td className="py-3 px-4 text-sm font-medium text-gray-900">{trans.product_name}</td>

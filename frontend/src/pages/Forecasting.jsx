@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
-  Tooltip, Legend, ResponsiveContainer
+  Tooltip, Legend, ResponsiveContainer, ComposedChart, Area, ReferenceLine
 } from 'recharts';
-import { TrendingUp } from 'lucide-react';
+import { TrendingUp, Info } from 'lucide-react';
 import { apiCall } from '../services/api';
 
 const Forecasting = () => {
@@ -121,8 +121,7 @@ const Forecasting = () => {
       });
   }, [historySeries, historyRangeDays, historyGranularity]);
 
-  // Combine actual history (ซีกซ้าย) + forecast (ซีกขวา)
-  // Combine actual history (ซีกซ้าย) + forecast (ซีกขวา)
+  // Combine actual history (Left) + forecast (Right)
   const chartData = useMemo(() => {
     if (!forecastData && visibleHistorySeries.length === 0) return [];
 
@@ -132,8 +131,9 @@ const Forecasting = () => {
         // Aggregate forecast into weeks to match history scale
         const buckets = {};
         const bucketCounts = {};
-        
-        // Helper to get Monday-based week key (replicated from visibleHistorySeries logic)
+        const ciBuckets = {};
+
+        // Helper to get Monday-based week key
         const getWeekKey = (d) => {
           const day = (d.getDay() + 6) % 7; // 0 = Monday
           const monday = new Date(d);
@@ -148,19 +148,30 @@ const Forecasting = () => {
           const d = new Date(dateISO);
           const k = getWeekKey(d);
           buckets[k] = (buckets[k] || 0) + forecastData.forecast.values[idx];
+          
+          if (!ciBuckets[k]) ciBuckets[k] = { lower: 0, upper: 0 };
+          const ci = forecastData.forecast.confidence_intervals[idx] || [0, 0];
+          ciBuckets[k].lower += ci[0];
+          ciBuckets[k].upper += ci[1];
+
           bucketCounts[k] = (bucketCounts[k] || 0) + 1;
         });
 
         forecastPoints = Object.keys(buckets).sort().map(k => {
           const d = new Date(k);
-          // Normalize to 7 days if partial week
           const daysInWeek = bucketCounts[k] || 1;
-          const normalized = Math.round((buckets[k] / daysInWeek) * 7);
           
+          // Normalize to 7 days
+          const normalizedVal = Math.round((buckets[k] / daysInWeek) * 7);
+          const normalizedLower = Math.max(0, Math.round((ciBuckets[k].lower / daysInWeek) * 7));
+          const normalizedUpper = Math.round((ciBuckets[k].upper / daysInWeek) * 7);
+
           return {
             dateISO: k,
             date: d.toLocaleDateString('th-TH', { month: 'short', day: 'numeric' }),
-            forecast: normalized,
+            forecast: normalizedVal,
+            ci_lower: normalizedLower,
+            ci_upper: normalizedUpper,
             isPartial: daysInWeek < 7
           };
         });
@@ -168,10 +179,13 @@ const Forecasting = () => {
         // Daily granularity
         forecastPoints = forecastData.forecast.dates.map((date, idx) => {
           const d = new Date(date);
+          const ci = forecastData.forecast.confidence_intervals[idx] || [0, 0];
           return {
             dateISO: date,
             date: d.toLocaleDateString('th-TH', { month: 'short', day: 'numeric' }),
-            forecast: Math.round(forecastData.forecast.values[idx])
+            forecast: Math.round(forecastData.forecast.values[idx]),
+            ci_lower: Math.max(0, Math.round(ci[0])),
+            ci_upper: Math.round(ci[1])
           };
         });
       }
@@ -180,8 +194,112 @@ const Forecasting = () => {
     return [...visibleHistorySeries, ...forecastPoints];
   }, [visibleHistorySeries, forecastData, historyGranularity]);
 
+  // -- 2. Total Cost Curve Logic --
+  const costCurveData = useMemo(() => {
+    if (!forecastData) return [];
+    
+    const { eoq, annual_demand } = forecastData.metrics;
+    const { unit_cost, ordering_cost, holding_cost_percentage } = forecastData.product;
+    const holding_cost_per_unit = unit_cost * holding_cost_percentage;
+
+    const dataPoints = [];
+    // Generate points from 0.5 * EOQ to 2.0 * EOQ
+    const startQ = Math.max(1, Math.floor(eoq * 0.5));
+    const endQ = Math.ceil(eoq * 2.0);
+    const step = Math.max(1, Math.floor((endQ - startQ) / 20)); // ~20 points
+
+    for (let Q = startQ; Q <= endQ; Q += step) {
+        const holding = (Q / 2) * holding_cost_per_unit;
+        const ordering = (annual_demand / Q) * ordering_cost;
+        const total = holding + ordering;
+
+        dataPoints.push({
+            qty: Q,
+            holding: holding,
+            ordering: ordering,
+            total: total
+        });
+    }
+    
+    const eoqHolding = (eoq / 2) * holding_cost_per_unit;
+    const eoqOrdering = (annual_demand / eoq) * ordering_cost;
+    const eoqTotal = eoqHolding + eoqOrdering;
+
+    dataPoints.push({
+        qty: Math.round(eoq),
+        holding: eoqHolding,
+        ordering: eoqOrdering,
+        total: eoqTotal,
+        isEOQ: true
+    });
+
+    return dataPoints.sort((a, b) => a.qty - b.qty);
+  }, [forecastData]);
+
+  // -- 3. Sawtooth Inventory Logic --
+  const sawtoothData = useMemo(() => {
+    if (!forecastData) return [];
+    
+    const { eoq, safety_stock, reorder_point, avg_daily_demand } = forecastData.metrics;
+    const { lead_time_days } = forecastData.product;
+    
+    // Simulate stock behavior
+    const maxStock = Math.round(eoq + safety_stock);
+    const data = [];
+    
+    let currentStock = maxStock;
+    let day = 1;
+    let pendingOrderDay = -1;
+    
+    const cycles = 3;
+    const cycleLength = eoq / avg_daily_demand;
+    // Estimate total days for 3 cycles + some buffer
+    const maxDays = Math.ceil((cycleLength * 3) + (lead_time_days * 3)) + 10;
+    
+    // Cap at reasonable number to prevent freezing if numbers are weird
+    const safeMaxDays = Math.min(maxDays, 365); 
+
+    // Re-simulating with time steps
+    while (day <= safeMaxDays) {
+        // Record start of day stock
+        data.push({
+            day: day,
+            stock: Math.max(0, currentStock),
+            reorderPoint: reorder_point,
+            safetyStock: safety_stock
+        });
+
+        // Check for order arrival at start of day (or end of previous day)
+        if (pendingOrderDay !== -1 && day >= pendingOrderDay) {
+            // Order arrives!
+            const previousStock = currentStock;
+            currentStock += eoq;
+            pendingOrderDay = -1;
+            
+            // Add a data point for the vertical jump (same day, higher stock)
+            data.push({
+                day: day,
+                stock: Math.max(0, currentStock),
+                reorderPoint: reorder_point,
+                safetyStock: safety_stock
+            });
+        }
+
+        // Check reorder point
+        if (currentStock <= reorder_point && pendingOrderDay === -1) {
+            pendingOrderDay = day + lead_time_days;
+        }
+        
+        // Consume stock
+        currentStock -= avg_daily_demand;
+        day++;
+    }
+
+    return data;
+  }, [forecastData]);
+
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-6 animate-in fade-in duration-500 pb-10">
       <h2 className="text-2xl font-bold text-gray-900">การพยากรณ์ความต้องการ</h2>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -233,15 +351,13 @@ const Forecasting = () => {
               onChange={(e) => setHistoryGranularity(e.target.value)}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
             >
-              <option value="weekly">รายสัปดาห์ (อ่านง่าย)</option>
-              <option value="daily">รายวัน (ละเอียด)</option>
+              <option value="weekly">รายสัปดาห์</option>
+              <option value="daily">รายวัน</option>
             </select>
           </div>
         </div>
         
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4 text-sm text-amber-800">
-           Tip: ถ้ากราฟแน่น ให้เลือก “รายสัปดาห์” + ย้อนหลัง 180 วัน
-        </div>
+        
 
         <button
           onClick={loadForecast}
@@ -317,38 +433,49 @@ const Forecasting = () => {
 
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <div className="mb-4">
-              <h3 className="text-lg font-bold text-gray-900">กราฟการพยากรณ์</h3>
+              <h3 className="text-lg font-bold text-gray-900">กราฟการพยากรณ์จริง vs คาดการณ์</h3>
               <p className="text-sm font-medium text-gray-800">
                 ARIMA({forecastData.forecast.arima_params.p}, {forecastData.forecast.arima_params.d}, {forecastData.forecast.arima_params.q}) ·
-                <span className="ml-1 text-gray-700">ยอดขายจริง (ซ้าย) vs พยากรณ์ (ขวา)</span>
+                <span className="ml-1 text-gray-500 font-normal">แถบสีเทาแสดงช่วงความเชื่อมั่น (Confidence Interval) ของการพยากรณ์</span>
               </p>
             </div>
 
             <div className="w-full h-[400px]">
                 <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData}>
+                <ComposedChart data={chartData.map(d => ({
+                     ...d,
+                     ci_range: [d.ci_lower, d.ci_upper] 
+                 }))}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                    <XAxis
-                    dataKey="date"
-                    stroke="#374151"
+                    <XAxis 
+                    dataKey="date" 
+                    stroke="#374151" 
                     tick={{ fill: '#1f2937', fontSize: 12, fontWeight: 500 }}
                     />
-                    <YAxis
-                    stroke="#374151"
+                    <YAxis 
+                    stroke="#374151" 
                     tick={{ fill: '#1f2937', fontSize: 12, fontWeight: 500 }}
                     />
                     <Tooltip
-                    contentStyle={{
-                        backgroundColor: 'white',
-                        border: '1px solid #e5e7eb',
-                        borderRadius: '8px',
-                        boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                        color: '#1f2937',
-                        fontWeight: '500'
-                    }}
-                    labelStyle={{ color: '#111827', fontWeight: '600' }}
+                        contentStyle={{
+                            backgroundColor: 'white',
+                            border: '1px solid #e5e7eb',
+                            borderRadius: '8px',
+                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                            color: '#1f2937',
+                            fontWeight: '500'
+                        }}
                     />
                     <Legend wrapperStyle={{ color: '#1f2937', fontWeight: '500' }} />
+
+                    <Area
+                        type="monotone"
+                        dataKey="ci_range"
+                        stroke="none"
+                        fill="#9ca3af"
+                        fillOpacity={0.2}
+                        name="ช่วงความเชื่อมั่น (95% CI)"
+                    />
 
                     <Line
                     type="monotone"
@@ -359,6 +486,7 @@ const Forecasting = () => {
                     dot={false}
                     activeDot={{ r: 5 }}
                     />
+
                     <Line
                     type="monotone"
                     dataKey="forecast"
@@ -369,8 +497,95 @@ const Forecasting = () => {
                     activeDot={{ r: 5 }}
                     strokeDasharray="4 2"
                     />
-                </LineChart>
+                </ComposedChart>
                 </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="mb-4 flex items-start justify-between">
+                    <div>
+                        <h3 className="text-lg font-bold text-gray-900">Total Cost Curve (กราฟต้นทุนรวม)</h3>
+                        <p className="text-sm text-gray-500">
+                            แสดงจุดสมดุล (Trade-off) ระหว่างต้นทุนการเก็บรักษาและต้นทุนการสั่งซื้อ
+                        </p>
+                    </div>
+                </div>
+
+                <div className="w-full h-[350px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={costCurveData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                            <XAxis 
+                                dataKey="qty" 
+                                label={{ value: 'ปริมาณสั่งซื้อ (Q)', position: 'insideBottom', offset: -5, fontSize: 12 }} 
+                                tick={{ fontSize: 12 }}
+                                type="number"
+                                domain={['dataMin', 'dataMax']}
+                            />
+                            <YAxis 
+                                tickFormatter={(val) => `฿${val}`}
+                                tick={{ fontSize: 12 }}
+                            />
+                            <Tooltip 
+                                formatter={(val) => `฿${val.toLocaleString()}`}
+                                contentStyle={{ borderRadius: '8px' }}
+                            />
+                            <Legend />
+                            
+                            <Line type="monotone" dataKey="holding" name="Holding Cost" stroke="#10b981" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="ordering" name="Ordering Cost" stroke="#ef4444" strokeWidth={2} dot={false} />
+                            <Line type="monotone" dataKey="total" name="Total Cost" stroke="#3b82f6" strokeWidth={3} dot={false} />
+                            
+                            <ReferenceLine x={Math.round(forecastData.metrics.eoq)} stroke="black" strokeDasharray="3 3" label={{ position: 'top', value: 'EOQ', fontSize: 12 }} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
+            </div>
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                <div className="mb-4 flex items-start justify-between">
+                    <div>
+                        <h3 className="text-lg font-bold text-gray-900">Sawtooth Inventory Model</h3>
+                        <p className="text-sm text-gray-500">
+                            แบบจำลองพฤติกรรมสต๊อกที่แสดงรอบการสั่งซื้อและของมาส่ง
+                        </p>
+                    </div>
+                </div>
+
+                <div className="w-full h-[350px]">
+                    <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={sawtoothData}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                            <XAxis 
+                                dataKey="day" 
+                                label={{ value: 'เวลา (วัน)', position: 'insideBottom', offset: -5, fontSize: 12 }} 
+                                tick={{ fontSize: 12 }}
+                                type="number"
+                                domain={[0, 'auto']}
+                                allowDecimals={false}
+                            />
+                            <YAxis tick={{ fontSize: 12 }} />
+                            <Tooltip contentStyle={{ borderRadius: '8px' }} />
+                            <Legend />
+                            
+                            <Line 
+                                type="linear" 
+                                dataKey="stock" 
+                                name="ระดับสต๊อก" 
+                                stroke="#8b5cf6" 
+                                strokeWidth={2} 
+                                dot={false}
+                                isAnimationActive={false}
+                            />
+                            
+                            <ReferenceLine y={forecastData.metrics.safety_stock} stroke="#ef4444" strokeDasharray="3 3" label={{ position: 'right', value: 'Safety Stock', fill: '#ef4444', fontSize: 12 }} />
+                            
+                            <ReferenceLine y={forecastData.metrics.reorder_point} stroke="#f59e0b" strokeDasharray="3 3" label={{ position: 'right', value: 'ROP', fill: '#f59e0b', fontSize: 12 }} />
+                        </LineChart>
+                    </ResponsiveContainer>
+                </div>
             </div>
           </div>
 
